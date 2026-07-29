@@ -12,7 +12,20 @@
           "package_name": "com.dark.focusclan"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "728413117488-rkqenpinlvjs7p13cbun1upffugos0ji.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.dark.focusclan",
+            "certificate_hash": "5a19538fa38cfd1e627243d77a129a8e944a2301"
+          }
+        },
+        {
+          "client_id": "728413117488-e0o9efo891ekckid3oa4vb7r1l7qu8kp.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBFos6Vs0I09bWMTWihLbVfCWj6Lvo41jo"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "728413117488-e0o9efo891ekckid3oa4vb7r1l7qu8kp.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

@@ -63,4 +63,10 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.02.01"))
     implementation("androidx.compose.material:material-icons-extended")
 
+
+
+    implementation("com.google.android.gms:play-services-auth:21.6.0")
+    implementation("androidx.credentials:credentials:1.6.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")
 }

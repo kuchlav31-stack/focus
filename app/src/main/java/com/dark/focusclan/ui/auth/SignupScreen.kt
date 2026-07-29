@@ -24,8 +24,16 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.credentials.CredentialManager
+import androidx.credentials.GetCredentialRequest
 import androidx.navigation.NavController
+import com.dark.focusclan.R
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,17 +43,66 @@ fun SignupScreen(navController: NavController) {
     var isLoading by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val auth = FirebaseAuth.getInstance()
+    val db = FirebaseFirestore.getInstance()
     val scrollState = rememberScrollState()
+
+    // TODO: REPLACE WITH YOUR REAL WEB CLIENT ID FROM FIREBASE CONSOLE
+    val webClientId = "728413117488-e0o9efo891ekckid3oa4vb7r1l7qu8kp.apps.googleusercontent.com"
+
+    // --- Google Signup Logic ---
+    fun handleGoogleSignup() {
+        val credentialManager = CredentialManager.create(context)
+        val googleIdOption = GetGoogleIdOption.Builder()
+            .setFilterByAuthorizedAccounts(false)
+            .setServerClientId(webClientId)
+            .setAutoSelectEnabled(true)
+            .build()
+
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(googleIdOption)
+            .build()
+
+        scope.launch {
+            try {
+                isLoading = true
+                val result = credentialManager.getCredential(context = context, request = request)
+                val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(result.credential.data)
+                val googleIdToken = googleIdTokenCredential.idToken
+
+                val credential = GoogleAuthProvider.getCredential(googleIdToken, null)
+
+                auth.signInWithCredential(credential).addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        val user = auth.currentUser
+                        // Check if profile exists
+                        db.collection("users").document(user?.uid ?: "").get()
+                            .addOnSuccessListener { doc ->
+                                isLoading = false
+                                if (doc.exists()) {
+                                    navController.navigate("home") { popUpTo("signup") { inclusive = true } }
+                                } else {
+                                    // New Google User -> Go to Profile Setup
+                                    navController.navigate("profile_setup")
+                                }
+                            }
+                    } else {
+                        isLoading = false
+                        Toast.makeText(context, "Google Auth Failed", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                isLoading = false
+                // Handle cancellation or errors
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(Color(0xFF0F0F0F), Color(0xFF121212))
-                )
-            )
+            .background(Brush.verticalGradient(listOf(Color(0xFF0F0F0F), Color(0xFF121212))))
     ) {
         Column(
             modifier = Modifier
@@ -56,7 +113,6 @@ fun SignupScreen(navController: NavController) {
         ) {
             Spacer(modifier = Modifier.height(80.dp))
 
-            // Header Section
             Text(
                 text = "Join FocusClan",
                 fontSize = 36.sp,
@@ -68,28 +124,24 @@ fun SignupScreen(navController: NavController) {
                 text = "Start your journey towards a focused life.",
                 fontSize = 15.sp,
                 color = Color.Gray,
-                modifier = Modifier
-                    .align(Alignment.Start)
-                    .padding(top = 6.dp)
+                modifier = Modifier.align(Alignment.Start).padding(top = 6.dp)
             )
 
             Spacer(modifier = Modifier.height(48.dp))
 
-            // 1. Google One-Tap UI
+            // 1. Google Signup Button
             OutlinedButton(
-                onClick = { /* Google Logic Implementation */ },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
+                onClick = { handleGoogleSignup() },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(16.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color.DarkGray),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                enabled = !isLoading
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Google Logo Placeholder
                     Icon(
-                        painter = painterResource(id = android.R.drawable.ic_menu_compass), // Replace with real google icon
-                        contentDescription = null,
+                        painter = painterResource(id = R.drawable.search), // Your Google Icon
+                        contentDescription = "Google Logo",
                         modifier = Modifier.size(22.dp),
                         tint = Color.Unspecified
                     )
@@ -100,7 +152,6 @@ fun SignupScreen(navController: NavController) {
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            // OR Divider
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Divider(modifier = Modifier.weight(1f), color = Color.DarkGray, thickness = 0.5.dp)
                 Text("  OR  ", color = Color.DarkGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -109,7 +160,7 @@ fun SignupScreen(navController: NavController) {
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            // 2. Email Input
+            // 2. Manual Email Input
             CustomSignupInput(
                 value = email,
                 onValueChange = { email = it },
@@ -119,7 +170,7 @@ fun SignupScreen(navController: NavController) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 3. Password Input
+            // 3. Manual Password Input
             CustomSignupInput(
                 value = password,
                 onValueChange = { password = it },
@@ -130,7 +181,7 @@ fun SignupScreen(navController: NavController) {
 
             Spacer(modifier = Modifier.height(40.dp))
 
-            // 4. Main Action Button
+            // 4. Manual Action Button
             Button(
                 onClick = {
                     if (email.isNotEmpty() && password.isNotEmpty()) {
@@ -138,7 +189,6 @@ fun SignupScreen(navController: NavController) {
                         auth.createUserWithEmailAndPassword(email, password)
                             .addOnSuccessListener {
                                 isLoading = false
-                                // SUCCESS: Move to Profile Setup for unique ID & Career
                                 navController.navigate("profile_setup") {
                                     popUpTo("signup") { inclusive = true }
                                 }
@@ -147,48 +197,28 @@ fun SignupScreen(navController: NavController) {
                                 isLoading = false
                                 Toast.makeText(context, "Signup Failed: ${it.message}", Toast.LENGTH_LONG).show()
                             }
-                    } else {
-                        Toast.makeText(context, "Fields cannot be empty", Toast.LENGTH_SHORT).show()
                     }
                 },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp),
+                modifier = Modifier.fillMaxWidth().height(60.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
                 shape = RoundedCornerShape(16.dp),
                 enabled = !isLoading
             ) {
-                AnimatedVisibility(visible = isLoading) {
-                    CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(24.dp))
-                }
-                if (!isLoading) {
-                    Text(
-                        text = "Initialize Clan ID",
-                        color = Color.Black,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                if (isLoading) CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(24.dp))
+                else Text("Initialize Clan ID", color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // 5. Footer: Skip or Login
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            // Footer
+            Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
                 Text("Already a member? ", color = Color.Gray)
-                TextButton(onClick = { navController.navigate("login") }) {
+                TextButton(onClick = { navController.navigate("login") }, contentPadding = PaddingValues(0.dp)) {
                     Text("Login", color = Color(0xFF00E676), fontWeight = FontWeight.Bold)
                 }
             }
 
-            TextButton(
-                onClick = { navController.navigate("home") },
-                modifier = Modifier.padding(top = 8.dp)
-            ) {
+            TextButton(onClick = { navController.navigate("home") }) {
                 Text("Skip for now", color = Color.DarkGray, fontSize = 13.sp)
             }
 
