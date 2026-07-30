@@ -8,6 +8,8 @@ import com.google.firebase.firestore.PropertyName
  */
 data class UserProfile(
     // Identification & Profile
+
+    val focusEndTime: Long = 0L,
     val uid: String = "",
     val username: String = "",         // Unique Focus ID (e.g., @warrior_99)
     val fullName: String = "",         // Display Name (e.g., Rahul Gupta)

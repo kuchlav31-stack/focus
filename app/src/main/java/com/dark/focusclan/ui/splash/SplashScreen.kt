@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,118 +29,124 @@ fun SplashScreen(navController: NavController) {
     val auth = FirebaseAuth.getInstance()
     val db = FirebaseFirestore.getInstance()
     val context = LocalContext.current
-    val prefs = context.getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE)
 
-    // Animation States
-    val scale = remember { Animatable(0.7f) }
+    // Animation States for a premium look
+    val scale = remember { Animatable(0.6f) }
     val alpha = remember { Animatable(0f) }
 
     LaunchedEffect(Unit) {
-        // Animation Start
-        launch {
-            scale.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing)
-            )
-        }
-        launch {
-            alpha.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 1200)
-            )
-        }
+        // 1. Start Branding Animations
+        launch { scale.animateTo(1f, tween(1000, easing = FastOutSlowInEasing)) }
+        launch { alpha.animateTo(1f, tween(1200)) }
 
-        delay(3000) // Branding Time + Background Checks
+        delay(2500) // branding display time
 
-        // 1. RESTART LOOPHOLE CHECK (Sabse Pehle)
-        val isLocked = prefs.getBoolean("isChallengeActive", false)
-        val endTime = prefs.getLong("endTime", 0L)
-
-        if (isLocked && System.currentTimeMillis() < endTime) {
-            val remainingMins = ((endTime - System.currentTimeMillis()) / 60000).toInt()
-            val challengeId = prefs.getString("activeChallengeId", "solo") ?: "solo"
-            navController.navigate("focus_mode/$challengeId/${remainingMins + 1}") {
-                popUpTo("splash") { inclusive = true }
-            }
-            return@LaunchedEffect
-        }
-
-        // 2. AUTH & PROFILE CHECK
         val currentUser = auth.currentUser
         if (currentUser != null) {
-            // Check if Profile (Career/Username) exists in Firestore
-            db.collection("users").document(currentUser.uid).get()
+            val uid = currentUser.uid
+
+            // --- FIREBASE SECURITY & FLOW CHECK ---
+            db.collection("users").document(uid).get()
                 .addOnSuccessListener { document ->
-                    if (document.exists() && document.contains("career")) {
-                        // User Profile is complete, now check Permissions
-                        if (PermissionUtils.allPermissionsGranted(context)) {
-                            navController.navigate("home") { popUpTo("splash") { inclusive = true } }
-                        } else {
-                            navController.navigate("permission_setup") { popUpTo("splash") { inclusive = true } }
+                    if (document.exists()) {
+                        val cloudEndTime = document.getLong("focusEndTime") ?: 0L
+                        val currentTime = System.currentTimeMillis()
+
+                        // A. ANTI-CHEAT CHECK: Agar cloud pe timer active hai
+                        if (cloudEndTime > currentTime) {
+                            val remainingMins = ((cloudEndTime - currentTime) / 60000).toInt()
+                            val savedMode = document.getLong("activeMode")?.toInt() ?: 3
+                            val challengeId = document.getString("activeChallengeId") ?: "solo"
+
+                            navController.navigate("focus_mode/$challengeId/${remainingMins + 1}/$savedMode") {
+                                popUpTo("splash") { inclusive = true }
+                            }
+                        }
+                        // B. PROFILE COMPLETION CHECK
+                        else if (!document.contains("career") || document.getString("career").isNullOrEmpty()) {
+                            navController.navigate("profile_setup") {
+                                popUpTo("splash") { inclusive = true }
+                            }
+                        }
+                        // C. PERMISSION CHECK (Aapki request ke mutabik)
+                        else if (!PermissionUtils.allPermissionsGranted(context)) {
+                            // Agar profile complete hai par user ne permissions off kar di hain
+                            navController.navigate("permission_setup") {
+                                popUpTo("splash") { inclusive = true }
+                            }
+                        }
+                        // D. ALL CLEAR -> GO HOME
+                        else {
+                            navController.navigate("home") {
+                                popUpTo("splash") { inclusive = true }
+                            }
                         }
                     } else {
-                        // Logged in but profile not setup (Incomplete Signup)
-                        navController.navigate("profile_setup") { popUpTo("splash") { inclusive = true } }
+                        // Document nahi mila (Signup incomplete)
+                        navController.navigate("profile_setup") {
+                            popUpTo("splash") { inclusive = true }
+                        }
                     }
                 }
                 .addOnFailureListener {
-                    // Internet issue or error, stay on Login
-                    navController.navigate("login") { popUpTo("splash") { inclusive = true } }
+                    // Internet issues? Stay on Login
+                    navController.navigate("login") {
+                        popUpTo("splash") { inclusive = true }
+                    }
                 }
         } else {
-            // No User Logged in
-            navController.navigate("login") { popUpTo("splash") { inclusive = true } }
+            // User not logged in
+            navController.navigate("login") {
+                popUpTo("splash") { inclusive = true }
+            }
         }
     }
 
-    // UI: Premium Dark Design with Gradient Logo
+    // --- UI DESIGN ---
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color(0xFF0F0F0F), Color(0xFF121212))
+                    colors = listOf(Color(0xFF0A0A0A), Color(0xFF121212))
                 )
             ),
         contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .scale(scale.value)
-                .alpha(alpha.value)
+            modifier = Modifier.scale(scale.value).alpha(alpha.value)
         ) {
-            // Visual Logo (Text for now, can be Image)
             Text(
                 text = "FocusClan",
-                fontSize = 52.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF00E676), // Neon Green
-                letterSpacing = (-1).sp
+                fontSize = 54.sp,
+                fontWeight = FontWeight.Black,
+                color = Color(0xFF00E676),
+                letterSpacing = (-2).sp
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "BUILD YOUR LEGACY",
-                fontSize = 14.sp,
+                text = "SYNCHRONIZING CLAN...",
+                fontSize = 11.sp,
                 color = Color.Gray,
-                letterSpacing = 6.sp,
-                fontWeight = FontWeight.Light
+                letterSpacing = 4.sp,
+                fontWeight = FontWeight.Bold
             )
         }
 
-        // Bottom Loading/Version Indicator
+        // Bottom Loading Indicator
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 40.dp)
+                .padding(bottom = 50.dp)
                 .alpha(alpha.value)
         ) {
-            Text(
-                text = "Syncing with Clan...",
-                color = Color(0xFF00E676).copy(alpha = 0.5f),
-                fontSize = 12.sp
+            CircularProgressIndicator(
+                modifier = Modifier.size(28.dp),
+                color = Color(0xFF00E676).copy(alpha = 0.4f),
+                strokeWidth = 2.dp
             )
         }
     }

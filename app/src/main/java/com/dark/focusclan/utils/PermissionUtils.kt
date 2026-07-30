@@ -1,9 +1,11 @@
 package com.dark.focusclan.utils
 
 import android.app.AppOpsManager
+import android.app.NotificationManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
 
@@ -42,6 +44,18 @@ object PermissionUtils {
         return dpm.isAdminActive(adminComponent)
     }
 
+    // utils/PermissionUtils.kt mein ye add karein:
+
+//    fun isBatteryOptimizationIgnored(context: Context): Boolean {
+//        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+//        return pm.isIgnoringBatteryOptimizations(context.packageName)
+//    }
+//
+//    fun isDndPermissionGranted(context: Context): Boolean {
+//        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+//        return nm.isNotificationPolicyAccessGranted
+//    }
+
     /**
      * 4. Check All Permissions
      * Splash screen aur setup screen par ye check karne ke liye ki kya sab allow hai.
@@ -51,4 +65,7 @@ object PermissionUtils {
                 hasUsageStatsPermission(context) &&
                 hasDeviceAdminPermission(context)
     }
+
+
+
 }

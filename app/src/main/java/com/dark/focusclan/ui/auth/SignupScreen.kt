@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -48,10 +49,10 @@ fun SignupScreen(navController: NavController) {
     val db = FirebaseFirestore.getInstance()
     val scrollState = rememberScrollState()
 
-    // TODO: REPLACE WITH YOUR REAL WEB CLIENT ID FROM FIREBASE CONSOLE
+    // Firebase Web Client ID
     val webClientId = "728413117488-e0o9efo891ekckid3oa4vb7r1l7qu8kp.apps.googleusercontent.com"
 
-    // --- Google Signup Logic ---
+    // --- Logic: Google Signup/Login ---
     fun handleGoogleSignup() {
         val credentialManager = CredentialManager.create(context)
         val googleIdOption = GetGoogleIdOption.Builder()
@@ -75,26 +76,27 @@ fun SignupScreen(navController: NavController) {
 
                 auth.signInWithCredential(credential).addOnCompleteListener { task ->
                     if (task.isSuccessful) {
-                        val user = auth.currentUser
-                        // Check if profile exists
-                        db.collection("users").document(user?.uid ?: "").get()
+                        val uid = auth.currentUser?.uid ?: ""
+                        // Unified Logic: Check if Firestore profile exists
+                        db.collection("users").document(uid).get()
                             .addOnSuccessListener { doc ->
                                 isLoading = false
-                                if (doc.exists()) {
+                                if (doc.exists() && doc.contains("career")) {
+                                    // Purana user hai, seedha Home
                                     navController.navigate("home") { popUpTo("signup") { inclusive = true } }
                                 } else {
-                                    // New Google User -> Go to Profile Setup
+                                    // Naya user hai, details bharni hongi
                                     navController.navigate("profile_setup")
                                 }
                             }
                     } else {
                         isLoading = false
-                        Toast.makeText(context, "Google Auth Failed", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Auth Failed", Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) {
                 isLoading = false
-                // Handle cancellation or errors
+                // Sign-in cancel ya error handle karein
             }
         }
     }
@@ -113,6 +115,7 @@ fun SignupScreen(navController: NavController) {
         ) {
             Spacer(modifier = Modifier.height(80.dp))
 
+            // Header
             Text(
                 text = "Join FocusClan",
                 fontSize = 36.sp,
@@ -121,7 +124,7 @@ fun SignupScreen(navController: NavController) {
                 modifier = Modifier.align(Alignment.Start)
             )
             Text(
-                text = "Start your journey towards a focused life.",
+                text = "Join the global elite focus community.",
                 fontSize = 15.sp,
                 color = Color.Gray,
                 modifier = Modifier.align(Alignment.Start).padding(top = 6.dp)
@@ -129,7 +132,7 @@ fun SignupScreen(navController: NavController) {
 
             Spacer(modifier = Modifier.height(48.dp))
 
-            // 1. Google Signup Button
+            // 1. Google Button
             OutlinedButton(
                 onClick = { handleGoogleSignup() },
                 modifier = Modifier.fillMaxWidth().height(56.dp),
@@ -141,12 +144,12 @@ fun SignupScreen(navController: NavController) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         painter = painterResource(id = R.drawable.search), // Your Google Icon
-                        contentDescription = "Google Logo",
+                        contentDescription = null,
                         modifier = Modifier.size(22.dp),
                         tint = Color.Unspecified
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text("Signup with Google", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Continue with Google", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
 
@@ -160,7 +163,7 @@ fun SignupScreen(navController: NavController) {
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            // 2. Manual Email Input
+            // 2. Email Field
             CustomSignupInput(
                 value = email,
                 onValueChange = { email = it },
@@ -170,7 +173,7 @@ fun SignupScreen(navController: NavController) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 3. Manual Password Input
+            // 3. Password Field
             CustomSignupInput(
                 value = password,
                 onValueChange = { password = it },
@@ -181,7 +184,7 @@ fun SignupScreen(navController: NavController) {
 
             Spacer(modifier = Modifier.height(40.dp))
 
-            // 4. Manual Action Button
+            // 4. Action Button
             Button(
                 onClick = {
                     if (email.isNotEmpty() && password.isNotEmpty()) {
@@ -189,13 +192,14 @@ fun SignupScreen(navController: NavController) {
                         auth.createUserWithEmailAndPassword(email, password)
                             .addOnSuccessListener {
                                 isLoading = false
+                                // Hamesha Profile Setup par bhejien naye email user ko
                                 navController.navigate("profile_setup") {
                                     popUpTo("signup") { inclusive = true }
                                 }
                             }
                             .addOnFailureListener {
                                 isLoading = false
-                                Toast.makeText(context, "Signup Failed: ${it.message}", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, "Error: ${it.message}", Toast.LENGTH_SHORT).show()
                             }
                     }
                 },
@@ -204,13 +208,16 @@ fun SignupScreen(navController: NavController) {
                 shape = RoundedCornerShape(16.dp),
                 enabled = !isLoading
             ) {
-                if (isLoading) CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(24.dp))
-                else Text("Initialize Clan ID", color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                if (isLoading) {
+                    CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(24.dp))
+                } else {
+                    Text("Initialize Clan ID", color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Footer
+            // Footer Links
             Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
                 Text("Already a member? ", color = Color.Gray)
                 TextButton(onClick = { navController.navigate("login") }, contentPadding = PaddingValues(0.dp)) {
@@ -245,7 +252,7 @@ fun CustomSignupInput(
         shape = RoundedCornerShape(16.dp),
         singleLine = true,
         visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-        keyboardOptions = if (isPassword) KeyboardOptions(keyboardType = KeyboardType.Password) else KeyboardOptions.Default,
+        keyboardOptions = KeyboardOptions(keyboardType = if (isPassword) KeyboardType.Password else KeyboardType.Email),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = Color(0xFF00E676),
             unfocusedBorderColor = Color(0xFF1E1E1E),

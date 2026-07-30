@@ -1,15 +1,20 @@
 package com.dark.focusclan.ui.setup
 
+import android.app.NotificationManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.PowerManager
 import android.provider.Settings
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Warning
@@ -29,99 +34,129 @@ import androidx.navigation.NavController
 import com.dark.focusclan.utils.FocusAdminReceiver
 import com.dark.focusclan.utils.PermissionUtils
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PermissionScreen(navController: NavController) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scrollState = rememberScrollState()
 
-    // States for Permissions
+    // --- State Management for 5 Core Permissions ---
     var overlayGranted by remember { mutableStateOf(PermissionUtils.hasOverlayPermission(context)) }
     var usageGranted by remember { mutableStateOf(PermissionUtils.hasUsageStatsPermission(context)) }
     var adminGranted by remember { mutableStateOf(PermissionUtils.hasDeviceAdminPermission(context)) }
 
-    // Automatic Re-check Logic: Jab user settings se wapis app mein aaye
+    // Nayi Permissions: Battery aur DND
+    var batteryGranted by remember { mutableStateOf(isBatteryOptimizationIgnored(context)) }
+    var dndGranted by remember { mutableStateOf(isDndPermissionGranted(context)) }
+
+    // Re-check logic jab user Settings se wapis aaye
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                // Settings se wapis aate hi check karo
                 overlayGranted = PermissionUtils.hasOverlayPermission(context)
                 usageGranted = PermissionUtils.hasUsageStatsPermission(context)
                 adminGranted = PermissionUtils.hasDeviceAdminPermission(context)
+                batteryGranted = isBatteryOptimizationIgnored(context)
+                dndGranted = isDndPermissionGranted(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val allDone = overlayGranted && usageGranted && adminGranted
+    val allDone = overlayGranted && usageGranted && adminGranted && batteryGranted && dndGranted
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF121212))
-            .padding(24.dp),
+            .padding(horizontal = 24.dp)
+            .verticalScroll(scrollState),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(modifier = Modifier.height(40.dp))
+        Spacer(modifier = Modifier.height(60.dp))
 
+        // --- Header Section ---
         Text(
             text = "Nuclear Setup",
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Bold,
+            fontSize = 34.sp,
+            fontWeight = FontWeight.ExtraBold,
             color = Color.White
         )
         Text(
-            text = "Grant permissions to activate the lock",
+            text = "Activate these shields for an unbreakable lock.",
             color = Color.Gray,
-            fontSize = 16.sp
+            fontSize = 14.sp,
+            modifier = Modifier.padding(top = 4.dp)
         )
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        // 1. Overlay Card
+        // --- Permission Cards List ---
+
+        // 1. Overlay (Lock Screen UI)
         PermissionRow(
-            title = "Display Over Other Apps",
-            description = "Allows showing the lock screen timer.",
+            title = "Display Over Apps",
+            description = "Crucial for showing the lockdown timer.",
             isGranted = overlayGranted,
             onClick = {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:${context.packageName}")
-                )
+                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
                 context.startActivity(intent)
             }
         )
 
-        // 2. Usage Stats Card
+        // 2. Usage Stats (Detect Distractions)
         PermissionRow(
             title = "Usage Access",
-            description = "Detects if you try to open other apps.",
+            description = "Helps the clan detect if you open other apps.",
             isGranted = usageGranted,
             onClick = {
                 context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
             }
         )
 
-        // 3. Device Admin Card
+        // 3. Device Admin (Uninstall Protection)
         PermissionRow(
             title = "Device Administrator",
-            description = "Prevents app uninstallation during focus.",
+            description = "Prevents stopping or deleting the app during battle.",
             isGranted = adminGranted,
             onClick = {
                 val componentName = ComponentName(context, FocusAdminReceiver::class.java)
                 val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
                     putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, componentName)
-                    putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "FocusClan needs this to protect your focus session.")
+                    putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "FocusClan needs this to prevent bypass.")
                 }
                 context.startActivity(intent)
             }
         )
 
-        Spacer(modifier = Modifier.weight(1f))
+        // 4. Battery Optimization (Immortal Service)
+        PermissionRow(
+            title = "Disable Battery Saver",
+            description = "Keeps the lock active even in the background.",
+            isGranted = batteryGranted,
+            onClick = {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                context.startActivity(intent)
+            }
+        )
 
-        // Continue Button
+        // 5. DND Access (Pure Silence)
+        PermissionRow(
+            title = "Notification Policy",
+            description = "Mutes all sounds to ensure deep work focus.",
+            isGranted = dndGranted,
+            onClick = {
+                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+            }
+        )
+
+        Spacer(modifier = Modifier.height(40.dp))
+
+        // --- Final Action Button ---
         Button(
             onClick = {
                 if (allDone) {
@@ -133,22 +168,22 @@ fun PermissionScreen(navController: NavController) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(60.dp),
-            enabled = allDone, // Jab tak sab allow na ho, button kaam nahi karega
+            enabled = allDone,
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (allDone) Color(0xFF00E676) else Color.DarkGray,
-                disabledContainerColor = Color(0xFF1E1E1E)
+                containerColor = if (allDone) Color(0xFF00E676) else Color(0xFF1E1E1E),
+                disabledContainerColor = Color(0xFF1A1A1A)
             ),
             shape = RoundedCornerShape(16.dp)
         ) {
             Text(
-                text = if (allDone) "ENTER CLAN" else "GRANT ALL TO CONTINUE",
-                color = if (allDone) Color.Black else Color.Gray,
+                text = if (allDone) "ENTER CLAN HUB" else "GRANT ALL SHIELDS",
+                color = if (allDone) Color.Black else Color.DarkGray,
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp
             )
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(40.dp))
     }
 }
 
@@ -164,14 +199,15 @@ fun PermissionRow(
             .fillMaxWidth()
             .padding(vertical = 8.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isGranted) Color(0xFF00E676).copy(alpha = 0.1f) else Color(0xFF1E1E1E)
+            containerColor = if (isGranted) Color(0xFF00E676).copy(alpha = 0.05f) else Color(0xFF1A1A1A)
         ),
-        shape = RoundedCornerShape(16.dp),
-        border = if (isGranted) null else androidx.compose.foundation.BorderStroke(1.dp, Color.DarkGray)
+        shape = RoundedCornerShape(20.dp),
+        border = if (isGranted) BorderStroke(1.dp, Color(0xFF00E676).copy(alpha = 0.3f))
+        else BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
     ) {
         Row(
             modifier = Modifier
-                .padding(16.dp)
+                .padding(18.dp)
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
@@ -186,25 +222,39 @@ fun PermissionRow(
                 Text(
                     text = description,
                     color = Color.Gray,
-                    fontSize = 12.sp
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
                 )
             }
 
             IconButton(
                 onClick = onClick,
-                enabled = !isGranted, // Allow hone ke baad click nahi hoga
+                enabled = !isGranted,
                 modifier = Modifier
                     .background(
-                        if (isGranted) Color.Transparent else Color(0xFF333333),
+                        if (isGranted) Color.Transparent else Color(0xFF252525),
                         CircleShape
                     )
             ) {
                 Icon(
                     imageVector = if (isGranted) Icons.Default.CheckCircle else Icons.Default.Warning,
                     contentDescription = null,
-                    tint = if (isGranted) Color(0xFF00E676) else Color.Yellow
+                    tint = if (isGranted) Color(0xFF00E676) else Color(0xFFFFD700),
+                    modifier = Modifier.size(28.dp)
                 )
             }
         }
     }
+}
+
+// --- Internal Helper Functions ---
+
+private fun isBatteryOptimizationIgnored(context: Context): Boolean {
+    val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    return pm.isIgnoringBatteryOptimizations(context.packageName)
+}
+
+private fun isDndPermissionGranted(context: Context): Boolean {
+    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    return nm.isNotificationPolicyAccessGranted
 }

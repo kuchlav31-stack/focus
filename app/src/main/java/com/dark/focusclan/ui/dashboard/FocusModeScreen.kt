@@ -1,10 +1,15 @@
 package com.dark.focusclan.ui.dashboard
 
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
@@ -12,7 +17,11 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
@@ -23,11 +32,12 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun FocusModeScreen(
     navController: NavController,
     challengeId: String,
-    duration: Int, // User ne jitne minute ka timer lagaya hai
+    duration: Int,
     mode: Int
 ) {
     val context = LocalContext.current
@@ -36,175 +46,233 @@ fun FocusModeScreen(
     val uid = auth.currentUser?.uid ?: ""
     val prefs = remember { context.getSharedPreferences("FocusPrefs", Context.MODE_PRIVATE) }
 
-    // --- State Management ---
+    // --- Timer & Logic States ---
     var timeLeft by remember { mutableLongStateOf(duration * 60L) }
     var isFinished by remember { mutableStateOf(false) }
+    var isSyncing by remember { mutableStateOf(true) }
+    val totalSeconds = duration * 60f
 
-    // UI Theme colors
+    // --- UI Animation States ---
+    val progress by animateFloatAsState(
+        targetValue = if (totalSeconds > 0) timeLeft / totalSeconds else 0f,
+        animationSpec = tween(1000, easing = LinearEasing), label = ""
+    )
+
+    val infiniteTransition = rememberInfiniteTransition(label = "")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f, targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse), label = ""
+    )
+
     val themeColor = when (mode) {
-        1 -> Color(0xFF00E676) // Basic (Neon Green)
-        2 -> Color(0xFFFFA500) // Advanced (Orange)
-        else -> Color.Red      // Nuclear (Deep Red)
+        1 -> Color(0xFF00E676)
+        2 -> Color(0xFFFFA500)
+        else -> Color(0xFFF44336)
     }
 
-    // 1. BACK BUTTON LOCKDOWN (For Advanced & Nuclear)
-    BackHandler(enabled = !isFinished && mode > 1) {
-        // Unbreakable: Back button disabled
-    }
+    // --- Back Button Lockdown (Strict) ---
+    BackHandler(enabled = !isFinished && mode > 1) { }
 
-    // --- CORE LOGIC BLOCK ---
+    // --- Core Timer & Cloud Sync Logic ---
     LaunchedEffect(Unit) {
-        // A. Online Focus Status (For friends to see green dot)
-        db.collection("users").document(uid).update("isFocusing", true)
+        val userRef = db.collection("users").document(uid)
 
-        // B. Nuclear Restart Protection Setup
-        if (mode == 3) {
-            val endTime = System.currentTimeMillis() + (timeLeft * 1000)
-            prefs.edit().apply {
-                putBoolean("isChallengeActive", true)
-                putLong("endTime", endTime)
-                putInt("activeMode", 3)
-                putString("activeChallengeId", challengeId)
-                apply()
+        // 1. CLOUD SYNC: Check if a session is already running on server
+        userRef.get().addOnSuccessListener { doc ->
+            val cloudEndTime = doc.getLong("focusEndTime") ?: 0L
+            val now = System.currentTimeMillis()
+
+            if (cloudEndTime > now) {
+                // Resume existing session
+                timeLeft = (cloudEndTime - now) / 1000
+            } else {
+                // Start NEW session and push to cloud
+                val newEndTime = now + (duration * 60 * 1000)
+                userRef.update("focusEndTime", newEndTime, "isFocusing", true)
+                timeLeft = (duration * 60).toLong()
+
+                // Local save for Restart Protection (Nuclear)
+                if (mode == 3) {
+                    prefs.edit().apply {
+                        putBoolean("isChallengeActive", true)
+                        putLong("endTime", newEndTime)
+                        putInt("activeMode", mode)
+                        putString("activeChallengeId", challengeId)
+                        apply()
+                    }
+                }
             }
+            isSyncing = false
         }
 
-        // C. Start Blocking Service (Pull-back logic)
+        // 2. DND & Pull-back Service
         if (mode >= 2) {
-            val intent = Intent(context, FocusService::class.java)
-            context.startForegroundService(intent)
+            toggleDND(context, true)
+            context.startForegroundService(Intent(context, FocusService::class.java))
         }
 
-        // D. Timer Loop (Runs every 1 second)
+        // 3. Main Countdown Loop
         while (timeLeft > 0) {
             delay(1000L)
             timeLeft--
+
+            // Sync Multiplayer progress if needed
+            if (challengeId != "solo" && timeLeft % 10 == 0L) { // Every 10 sec
+                db.collection("challenges").document(challengeId).update("results.$uid", "focusing")
+            }
         }
 
-        // --- SESSION SUCCESS LOGIC ---
+        // --- SUCCESS SEQUENCE ---
         isFinished = true
+        toggleDND(context, false)
 
-        // 1. CALCULATE TIERED REWARDS (Aapka Coin Logic)
-        val earnedCoins: Long = when {
-            duration >= 240 -> 10000L // 4 Hours+
-            duration >= 180 -> 5000L  // 3 Hours
-            duration >= 120 -> 1000L  // 2 Hours
-            duration >= 60  -> 500L   // 1 Hour
-            duration >= 30  -> 100L   // 30 Mins
-            duration >= 1   -> 10L    // 1-30 Mins ke beech
-            else -> 0L
-        }
-
-        // 2. Update Firestore Stats (Atomic Increment)
+        val earnedCoins = calculateFinalCoins(duration)
         val updates = hashMapOf<String, Any>(
             "isFocusing" to false,
-            "coins" to FieldValue.increment(earnedCoins), // Har session ke rewards add honge
-            "totalHours" to FieldValue.increment(duration / 60.0), // Precision hours
-            "streak" to FieldValue.increment(1) // Daily streak increase
+            "focusEndTime" to 0L, // Reset cloud timer
+            "coins" to FieldValue.increment(earnedCoins),
+            "totalHours" to FieldValue.increment(duration / 60.0),
+            "streak" to FieldValue.increment(1)
         )
-        db.collection("users").document(uid).update(updates)
+        userRef.update(updates)
 
-        // 3. CLEANUP: Disable Restart Protection & Stop Blocking Service
-        if (mode == 3) {
-            prefs.edit().putBoolean("isChallengeActive", false).apply()
-        }
-        if (mode >= 2) {
-            context.stopService(Intent(context, FocusService::class.java))
-        }
+        if (mode == 3) prefs.edit().putBoolean("isChallengeActive", false).apply()
+        context.stopService(Intent(context, FocusService::class.java))
     }
 
-    // --- UI LAYOUT ---
-    Column(
-        modifier = Modifier.fillMaxSize().background(Color(0xFF000000)), // Pitch Black for focus
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    // --- UI Layout ---
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color(0xFF050505)),
+        contentAlignment = Alignment.Center
     ) {
-        // Mode Badge
-        Surface(
-            color = themeColor.copy(alpha = 0.1f),
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.padding(bottom = 24.dp)
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = if (mode == 3) Icons.Default.Shield else Icons.Default.Lock,
-                    contentDescription = null,
-                    tint = themeColor,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (isFinished) "SESSION SUCCESS" else "${internalGetModeName(mode)} LOCKDOWN",
-                    color = themeColor,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 12.sp,
-                    letterSpacing = 2.sp
-                )
-            }
-        }
-
-        // Massive Timer Display
-        val mins = timeLeft / 60
-        val secs = timeLeft % 60
-        Text(
-            text = "%02d:%02d".format(mins, secs),
-            fontSize = 100.sp,
-            fontWeight = FontWeight.Thin,
-            color = Color.White
-        )
-
-        Spacer(modifier = Modifier.height(60.dp))
-
-        // Success State
-        if (isFinished) {
-            val coinsWon: Long = when {
-                duration >= 240 -> 10000L
-                duration >= 180 -> 5000L
-                duration >= 120 -> 1000L
-                duration >= 60 -> 500L
-                duration >= 30 -> 100L
-                else -> 10L
-            }
-
-            Text(text = "You earned $coinsWon War Coins!", color = Color(0xFFFFD700), fontWeight = FontWeight.Bold)
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Button(
-                onClick = {
-                    navController.navigate("home") {
-                        popUpTo("home") { inclusive = true }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(0.7f).height(56.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Text("COLLECT REWARDS", color = Color.Black, fontWeight = FontWeight.Bold)
-            }
+        if (isSyncing) {
+            CircularProgressIndicator(color = Color(0xFF00E676))
         } else {
-            // Active Lock State message
-            Text(
-                text = if (mode == 1) "Focusing in Safe Mode" else "Unbreakable Lockdown Active",
-                color = Color.DarkGray,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+
+                // 1. Status Badge
+                AnimatedContent(targetState = isFinished, label = "") { finished ->
+                    if (finished) {
+                        BadgeUI("MISSION ACCOMPLISHED", Color(0xFF00E676), Icons.Default.Shield)
+                    } else {
+                        BadgeUI("${internalGetModeName(mode)} LOCKDOWN", themeColor, if(mode==3) Icons.Default.Shield else Icons.Default.Lock)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(60.dp))
+
+                // 2. Visual Timer Ring
+                Box(contentAlignment = Alignment.Center) {
+                    Canvas(modifier = Modifier.size(280.dp)) {
+                        drawCircle(color = Color.White.copy(0.05f), style = Stroke(width = 4.dp.toPx()))
+                    }
+                    Canvas(modifier = Modifier.size(280.dp)) {
+                        drawArc(
+                            brush = Brush.sweepGradient(listOf(themeColor.copy(0.2f), themeColor)),
+                            startAngle = -90f,
+                            sweepAngle = 360 * progress,
+                            useCenter = false,
+                            style = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "%02d:%02d".format(timeLeft / 60, timeLeft % 60),
+                            fontSize = 85.sp,
+                            fontWeight = FontWeight.ExtraLight,
+                            color = Color.White,
+                            letterSpacing = (-2).sp
+                        )
+                        Text(
+                            text = if (isFinished) "WARRIOR" else "STAY FOCUSED",
+                            color = themeColor.copy(pulseAlpha),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 4.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(80.dp))
+
+                // 3. Success / Motivation
+                if (isFinished) {
+                    VictorySection(duration) {
+                        navController.navigate("home") { popUpTo("home") { inclusive = true } }
+                    }
+                } else {
+                    Text(
+                        "Device is under Nuclear Control.",
+                        color = Color.DarkGray,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        "No Exit Allowed.",
+                        color = themeColor.copy(alpha = 0.5f),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
         }
     }
 }
 
-/**
- * Helper function with internal name to avoid naming conflicts
- */
-private fun internalGetModeName(mode: Int): String {
-    return when (mode) {
-        1 -> "BASIC"
-        2 -> "ADVANCED"
-        3 -> "NUCLEAR"
-        else -> "UNKNOWN"
+@Composable
+fun BadgeUI(text: String, color: Color, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Surface(
+        color = color.copy(0.1f),
+        shape = RoundedCornerShape(20.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(0.3f))
+    ) {
+        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = color, modifier = Modifier.size(14.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(text = text, color = color, fontWeight = FontWeight.Black, fontSize = 11.sp, letterSpacing = 1.sp)
+        }
     }
+}
+
+@Composable
+fun VictorySection(duration: Int, onCollect: () -> Unit) {
+    val coins = calculateFinalCoins(duration)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Reward: $coins War Coins", color = Color(0xFFFFD700), fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+        Spacer(modifier = Modifier.height(32.dp))
+        Button(
+            onClick = onCollect,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+            modifier = Modifier.fillMaxWidth(0.7f).height(58.dp),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Text("CLAIM & RETURN", color = Color.Black, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+// --- UTILS ---
+
+private fun calculateFinalCoins(duration: Int): Long {
+    return when {
+        duration >= 240 -> 10000L
+        duration >= 180 -> 5000L
+        duration >= 120 -> 1000L
+        duration >= 60 -> 500L
+        duration >= 30 -> 100L
+        else -> 10L
+    }
+}
+
+private fun toggleDND(context: Context, enable: Boolean) {
+    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    try {
+        if (nm.isNotificationPolicyAccessGranted) {
+            nm.setInterruptionFilter(if (enable) NotificationManager.INTERRUPTION_FILTER_NONE else NotificationManager.INTERRUPTION_FILTER_ALL)
+        }
+    } catch (e: Exception) {}
+}
+
+private fun internalGetModeName(mode: Int) = when (mode) {
+    1 -> "BASIC" 2 -> "ADVANCED" 3 -> "NUCLEAR" else -> "SAFE"
 }
