@@ -3,41 +3,42 @@ package com.dark.focusclan.models
 import com.google.firebase.firestore.PropertyName
 
 /**
- * Production-ready User Profile Model
- * Default values ensure Firestore can deserialize the data correctly.
+ * Production-ready User Profile Model.
+ * Default values ensure Firestore can deserialize the data correctly even if some fields are missing.
  */
 data class UserProfile(
-    // Identification
+    // Identification & Profile
     val uid: String = "",
-    val username: String = "",    // Unique Focus ID (e.g., @rahul_12)
-    val fullName: String = "",    // Display Name
-    val friendsList: List<String> = emptyList(), // UIDs of friends
+    val username: String = "",         // Unique Focus ID (e.g., @warrior_99)
+    val fullName: String = "",         // Display Name (e.g., Rahul Gupta)
+    val profilePicUrl: String = "",    // NEW: URL for Firebase Storage image
+    val friendsList: List<String> = emptyList(), // Array of Friend UIDs
 
     // Clan / Professional Info
-    val career: String = "",      // Career Field (e.g., Coder, UPSC)
-    val motto: String = "",       // Profile Motto/Bio
+    val career: String = "",           // Career Field (e.g., Coder, UPSC)
+    val motto: String = "",            // Focus Motto / Bio
 
     // Stats & Gamification
-    val totalHours: Double = 0.0, // Precision ke liye Double (e.g., 1.5 hours)
-    val coins: Int = 0,
-    val streak: Int = 0,          // Daily focus streak counter
+    val totalHours: Double = 0.0,      // Total cumulative focus hours
+    val coins: Int = 0,                // Total War Coins earned
+    val streak: Int = 0,               // Current consecutive days streak
 
     // Live Social Status
-    // @get:PropertyName aur @set:PropertyName isliye taaki Firebase
-    // "isFocusing" field ko sahi se map kare (boolean naming convention)
+    // @get:PropertyName is necessary for Boolean fields starting with "is"
+    // to map correctly between Kotlin and Firebase.
     @get:PropertyName("isFocusing")
     @set:PropertyName("isFocusing")
-    var isFocusing: Boolean = false,
+    var isFocusing: Boolean = false,   // Shows Green Dot to friends
 
-    // Gatekeeping
+    // Gatekeeping & Onboarding
     @get:PropertyName("isProfileComplete")
     @set:PropertyName("isProfileComplete")
-    var isProfileComplete: Boolean = false,
+    var isProfileComplete: Boolean = false, // Checks if user finished setup
 
     // Metadata
     val createdAt: Long = System.currentTimeMillis(),
 
-    // UI Helper State (This is usually not stored in the user doc itself
-    // but used for Discovery Screen logic)
-    var requestStatus: String = "none" // values: "none", "sent", "friends"
+    // Transient UI State (Not saved in Firestore users collection usually)
+    // Used for Discovery Screen to track button states locally
+    var requestStatus: String = "none" // "none", "sent", "friends"
 )

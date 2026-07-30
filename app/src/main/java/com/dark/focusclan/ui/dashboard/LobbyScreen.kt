@@ -43,6 +43,19 @@ fun LobbyScreen(navController: NavController, challengeId: String, viewModel: Lo
             }
         }
     }
+    // LobbyScreen.kt mein "active" status wala listener update karein:
+
+    LaunchedEffect(viewModel.challengeStatus.value) {
+        if (viewModel.challengeStatus.value == "active") {
+            val duration = viewModel.challengeDuration.value
+
+            // FIX: Route match kiya (challengeId/duration/mode)
+            // Yahan '3' ka matlab hai Nuclear Mode (Restart protection + Pullback)
+            navController.navigate("focus_mode/$challengeId/$duration/3") {
+                popUpTo("lobby/$challengeId") { inclusive = true }
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
